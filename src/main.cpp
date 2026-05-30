@@ -65,11 +65,7 @@ QueueHandle_t    audioQueue;
 volatile bool    musicRunning = false;
 volatile bool    gameOver     = false;
 
-// ── Mutex per protegir accés als rècords (FreeRTOS) ──────────
-// Compartit entre wifiTask (core 0) i runGame (core 1)
 SemaphoreHandle_t recordMutex;
-
-// ── Estat WiFi ────────────────────────────────────────────────
 volatile bool wifiActiu = false;
 
 void audioInit() {
@@ -180,9 +176,6 @@ void triggerScore()    { AudioEvent e=SFX_SCORE;    xQueueSend(audioQueue,&e,0);
 void triggerCrash()    { AudioEvent e=SFX_CRASH;    xQueueSend(audioQueue,&e,0); }
 void triggerGameOver() { AudioEvent e=SFX_GAMEOVER; xQueueSend(audioQueue,&e,0); }
 
-// ── Tasca WiFi (core 0, prioritat 1) ─────────────────────────
-// Gestiona el servidor web en segon pla sempre que wifiActiu=true
-// Usa recordMutex per accedir als rècords de forma segura
 #define AP_SSID "ESPectro"
 #define AP_PASS "gameloader"
 #define AP_IP   "192.168.4.1"
@@ -191,9 +184,7 @@ WebServer server(80);
 
 void wifiTask(void* param) {
     while (true) {
-        if (wifiActiu) {
-            server.handleClient();
-        }
+        if (wifiActiu) server.handleClient();
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 }
@@ -208,9 +199,8 @@ void wifiTask(void* param) {
 #define BTN_B_PIN  41
 
 // ============================================================
-//  WIFI / GAME LOADER
+//  DASHBOARD WEB
 // ============================================================
-
 const char PAGE_HTML[] PROGMEM = R"rawhtml(
 <!DOCTYPE html>
 <html lang="ca">
@@ -237,18 +227,12 @@ h1 span{color:#fff;}
 .stat-label{color:#888;font-size:0.85em;}
 .stat-val{color:#0f0;font-weight:bold;font-size:1.1em;}
 .stat-val.gold{color:#ffd700;}
-.stat-val.red{color:#f44;}
-
-/* Gràfica de barres */
 .chart{margin-top:0.5em;}
 .chart-title{color:#888;font-size:0.75em;margin-bottom:0.5em;}
 .bars{display:flex;align-items:flex-end;gap:3px;height:80px;}
 .bar-wrap{display:flex;flex-direction:column;align-items:center;flex:1;}
-.bar{width:100%;background:#ff5000;border-radius:2px 2px 0 0;
-     transition:height 0.5s;min-height:2px;}
+.bar{width:100%;background:#ff5000;border-radius:2px 2px 0 0;min-height:2px;}
 .bar-val{color:#888;font-size:0.55em;margin-top:2px;}
-
-/* Upload */
 input[type=file]{display:none;}
 label.btn,button.btn{display:inline-block;padding:0.6em 1.2em;margin:0.3em 0;
   background:#ff5000;color:#fff;border:none;border-radius:6px;
@@ -260,16 +244,12 @@ label.btn:hover,button.btn:hover{background:#cc3e00;}
 #bar{height:100%;width:0;background:#ff5000;border-radius:4px;transition:width 0.3s;}
 #status{min-height:1.5em;font-size:0.85em;color:#ff0;}
 .ok{color:#0f0!important;} .err{color:#f44!important;}
-
-.full{grid-column:1/-1;}
 .sep{border:none;border-top:1px solid #333;margin:0.8em 0;}
 </style>
 </head>
 <body>
 <h1><span>ESP</span>ectro — Dashboard</h1>
 <div class="grid">
-
-  <!-- Stats Road Rush -->
   <div class="card" id="card-roadrush">
     <h2>🏎 Road Rush</h2>
     <div id="stats-roadrush">
@@ -281,8 +261,6 @@ label.btn:hover,button.btn:hover{background:#cc3e00;}
       <div class="bars" id="bars-roadrush"></div>
     </div>
   </div>
-
-  <!-- Upload -->
   <div class="card">
     <h2>⬆ Carregar joc</h2>
     <label class="btn" for="file">📂 Triar .bin</label>
@@ -292,11 +270,8 @@ label.btn:hover,button.btn:hover{background:#cc3e00;}
     <div id="progress"><div id="bar"></div></div>
     <div id="status"></div>
   </div>
-
 </div>
-
 <script>
-// ── Carregar dades ────────────────────────────────────────────
 function avg(arr){ return arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0; }
 function renderGame(key, name, data){
   const hist = data.history || [];
@@ -304,58 +279,30 @@ function renderGame(key, name, data){
   const mitjana = avg(hist);
   const partides = hist.length;
   const darrera = hist[0] || 0;
-
   document.getElementById('stats-' + key).innerHTML = `
-    <div class="stat">
-      <span class="stat-label">🏆 Rècord</span>
-      <span class="stat-val gold">${best} pts</span>
-    </div>
-    <div class="stat">
-      <span class="stat-label">🎮 Partides jugades</span>
-      <span class="stat-val">${partides}</span>
-    </div>
-    <div class="stat">
-      <span class="stat-label">📊 Mitjana</span>
-      <span class="stat-val">${mitjana} pts</span>
-    </div>
-    <div class="stat">
-      <span class="stat-label">🕹 Darrera partida</span>
-      <span class="stat-val ${darrera===best&&best>0?'gold':''}">${darrera} pts</span>
-    </div>`;
-
-  // Gràfica de barres (últimes 10)
+    <div class="stat"><span class="stat-label">🏆 Rècord</span><span class="stat-val gold">${best} pts</span></div>
+    <div class="stat"><span class="stat-label">🎮 Partides jugades</span><span class="stat-val">${partides}</span></div>
+    <div class="stat"><span class="stat-label">📊 Mitjana</span><span class="stat-val">${mitjana} pts</span></div>
+    <div class="stat"><span class="stat-label">🕹 Darrera partida</span><span class="stat-val ${darrera===best&&best>0?'gold':''}">${darrera} pts</span></div>`;
   const barsDiv = document.getElementById('bars-' + key);
   const last10 = hist.slice(0, 10).reverse();
   const maxVal = Math.max(...last10, 1);
   barsDiv.innerHTML = last10.map(v => {
     const h = Math.round((v / maxVal) * 70);
     const isRecord = v === best && best > 0;
-    return `<div class="bar-wrap">
-      <div class="bar" style="height:${h}px;background:${isRecord?'#ffd700':'#ff5000'}"></div>
-      <div class="bar-val">${v}</div>
-    </div>`;
+    return `<div class="bar-wrap"><div class="bar" style="height:${h}px;background:${isRecord?'#ffd700':'#ff5000'}"></div><div class="bar-val">${v}</div></div>`;
   }).join('');
   if(last10.length===0) barsDiv.innerHTML='<span style="color:#555;font-size:0.8em">Sense dades</span>';
 }
-
-fetch('/records')
-  .then(r=>r.json())
-  .then(data=>{
-    if(data.road_rush) renderGame('roadrush','Road Rush',data.road_rush);
-  })
-  .catch(()=>{
-    document.getElementById('stats-roadrush').innerHTML=
-      '<div class="stat"><span class="stat-label" style="color:#f44">Error carregant</span></div>';
-  });
-
-// Auto-refresc cada 10 segons
-setInterval(()=>{
+function load(){
   fetch('/records').then(r=>r.json()).then(data=>{
     if(data.road_rush) renderGame('roadrush','Road Rush',data.road_rush);
-  }).catch(()=>{});
-}, 10000);
-
-// ── Upload ────────────────────────────────────────────────────
+  }).catch(()=>{
+    document.getElementById('stats-roadrush').innerHTML='<div class="stat"><span class="stat-label" style="color:#f44">Error carregant</span></div>';
+  });
+}
+load();
+setInterval(load, 10000);
 const fi=document.getElementById('file');
 fi.addEventListener('change',()=>{
   document.getElementById('filename').textContent=fi.files[0]?.name||'Cap arxiu';
@@ -378,13 +325,8 @@ function upload(){
     }
   };
   xhr.onload=()=>{
-    if(xhr.status===200){
-      status.textContent='✅ Joc instal·lat. Reiniciant...';
-      status.className='ok';
-    } else {
-      status.textContent='❌ Error: '+xhr.responseText;
-      status.className='err';
-    }
+    if(xhr.status===200){status.textContent='✅ Joc instal·lat. Reiniciant...';status.className='ok';}
+    else{status.textContent='❌ Error: '+xhr.responseText;status.className='err';}
   };
   xhr.onerror=()=>{status.textContent='❌ Error de connexió';status.className='err';};
   const fd=new FormData();
@@ -395,8 +337,9 @@ function upload(){
 </body>
 </html>
 )rawhtml";
-const int SCREEN_W   = 320;
-const int SCREEN_H   = 480;
+
+const int SCREEN_W = 320;
+const int SCREEN_H = 480;
 
 void showSplash() {
     tft.fillScreen(TFT_BLACK);
@@ -419,18 +362,15 @@ void showSplash() {
     tft.setCursor(SCREEN_W/2 - tft.textWidth(autors)/2, y_titol+86);
     tft.print(autors);
     tft.fillRect(0, SCREEN_H-6, SCREEN_W, 6, TARONJA);
-playTone(220.0f, 120, 0.15f); playSilence(30);
-playTone(277.2f, 120, 0.15f); playSilence(30);
-playTone(329.6f, 120, 0.15f); 
-
+    playTone(220.0f, 120, 0.15f); playSilence(30);
+    playTone(277.2f, 120, 0.15f); playSilence(30);
+    playTone(329.6f, 120, 0.15f);
     delay(500);
 }
 
-// ── Records NVS amb historial ─────────────────────────────────
-// Rècord màxim: clau "road_rush" -> int32
-// Historial:    clau "road_rush_h" -> string JSON "[45,32,28,...]"
-// Últimes 20 partides per joc, persisteix entre reinicis i jocs
-
+// ============================================================
+//  RECORDS NVS
+// ============================================================
 #define MAX_HISTORY 20
 
 int loadRecord(const char* key) {
@@ -466,13 +406,10 @@ void saveRecord(const char* key, int score) {
     nvs_handle_t h;
     nvs_flash_init();
     if (nvs_open("records", NVS_READWRITE, &h) == ESP_OK) {
-        // Actualitzar rècord màxim
         int32_t current = 0;
         nvs_get_i32(h, key, &current);
         if (score > current)
             nvs_set_i32(h, key, (int32_t)score);
-
-        // Actualitzar historial
         String hkey = String(key) + "_h";
         String hist = "[]";
         size_t len = 0;
@@ -482,8 +419,6 @@ void saveRecord(const char* key, int score) {
             hist = String(buf);
             delete[] buf;
         }
-
-        // Afegir nova puntuació al principi, limitar a MAX_HISTORY
         String inner = hist.substring(1, hist.length()-1);
         String nova;
         if (inner.length() == 0) {
@@ -493,8 +428,8 @@ void saveRecord(const char* key, int score) {
             for (int i = 0; i < (int)inner.length(); i++)
                 if (inner[i] == ',') count++;
             if (count >= MAX_HISTORY) {
-                int lastComma = inner.lastIndexOf(',');
-                inner = (lastComma >= 0) ? inner.substring(0, lastComma) : "";
+                int lc = inner.lastIndexOf(',');
+                inner = (lc >= 0) ? inner.substring(0, lc) : "";
             }
             nova = (inner.length() > 0)
                 ? "[" + String(score) + "," + inner + "]"
@@ -517,7 +452,9 @@ String getAllRecords() {
     return "{\"road_rush\":{\"best\":0,\"history\":[]}}";
 }
 
-// ── Handlers web ──────────────────────────────────────────────
+// ============================================================
+//  HANDLERS WEB
+// ============================================================
 void handleRoot()    { server.send_P(200, "text/html", PAGE_HTML); }
 void handleRecords() { server.send(200, "application/json", getAllRecords()); }
 void handleUpdate()  {
@@ -553,6 +490,65 @@ void handleUpdateUpload() {
 }
 
 // ============================================================
+//  HANDLERS MCP
+// ============================================================
+void handleMcpTools() {
+    String json = "{\"tools\":["
+        "{\"name\":\"get_records\","
+         "\"description\":\"Retorna els records i historial de puntuacions de tots els jocs de la consola ESPectro\","
+         "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
+        "{\"name\":\"get_status\","
+         "\"description\":\"Retorna l'estat actual de la consola: uptime, memoria lliure i versio\","
+         "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
+        "{\"name\":\"get_system_info\","
+         "\"description\":\"Retorna informacio tecnica del hardware: CPU, memoria PSRAM, frequencia i chip\","
+         "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
+        "]}";
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json", json);
+}
+
+void handleMcpGetRecords() {
+    String records = getAllRecords();
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json",
+        "{\"content\":[{\"type\":\"text\",\"text\":" + records + "}]}");
+}
+
+void handleMcpGetStatus() {
+    unsigned long uptime = millis() / 1000;
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json",
+        "{\"content\":[{\"type\":\"text\",\"text\":{"
+        "\"uptime_s\":" + String(uptime) + ","
+        "\"free_heap_bytes\":" + String(ESP.getFreeHeap()) + ","
+        "\"wifi_ssid\":\"ESPectro\","
+        "\"ip\":\"192.168.4.1\","
+        "\"version\":\"1.0.0\"}}]}");
+}
+
+void handleMcpGetSystemInfo() {
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    server.send(200, "application/json",
+        "{\"content\":[{\"type\":\"text\",\"text\":{"
+        "\"chip\":\"ESP32-S3\","
+        "\"cpu_freq_mhz\":" + String(ESP.getCpuFreqMHz()) + ","
+        "\"flash_size_mb\":" + String(ESP.getFlashChipSize()/1024/1024) + ","
+        "\"free_heap_bytes\":" + String(ESP.getFreeHeap()) + ","
+        "\"free_psram_bytes\":" + String(ESP.getFreePsram()) + ","
+        "\"sdk_version\":\"" + String(ESP.getSdkVersion()) + "\"}}]}");
+}
+
+void handleMcpCall() {
+    String tool = server.arg("tool");
+    if      (tool == "get_records")     handleMcpGetRecords();
+    else if (tool == "get_status")      handleMcpGetStatus();
+    else if (tool == "get_system_info") handleMcpGetSystemInfo();
+    else server.send(404, "application/json",
+             "{\"error\":\"Tool no trobada: " + tool + "\"}");
+}
+
+// ============================================================
 //  GAME LOADER
 // ============================================================
 void runGameLoader() {
@@ -575,25 +571,19 @@ void runGameLoader() {
     tft.setTextColor(TFT_CYAN, TFT_BLACK);
     tft.setCursor(10, 232);  tft.printf("http://%s", AP_IP);
     tft.drawFastHLine(10, 256, 300, TFT_DARKGREY);
-
     tft.setTextColor(TFT_YELLOW, TFT_BLACK);
     tft.setTextSize(1);
     tft.setCursor(10, 268); tft.print("RECORDS:");
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setCursor(10, 282);
     tft.printf("Road Rush: %d pts", loadRecord("road_rush"));
-
     tft.setTextColor(tft.color565(150,150,150), TFT_BLACK);
     tft.setCursor(10, 440);
     tft.print("Prem A per tornar al menu");
 
-    // Iniciar WiFi i servidor si no estan actius
-    // Esperar botó A per tornar (la wifiTask gestiona el servidor)
     while (true) {
         if (digitalRead(BTN_A_PIN) == LOW) {
-  
             delay(300);
-            // No aturem el WiFi — segueix actiu en segon pla
             return;
         }
         delay(20);
@@ -605,33 +595,23 @@ void runGameLoader() {
 // ============================================================
 void drawMenu(int bestScore) {
     tft.fillScreen(TFT_BLACK);
-
-    // Títol
     tft.setTextColor(tft.color565(255,60,0), TFT_BLACK);
     tft.setTextSize(4);
     const char* t1 = "ROAD";
     const char* t2 = "RUSH";
     tft.setCursor(320/2 - tft.textWidth(t1)/2, 50);  tft.print(t1);
     tft.setCursor(320/2 - tft.textWidth(t2)/2, 100); tft.print(t2);
-
     tft.drawFastHLine(40, 158, 240, tft.color565(255,60,0));
-
-    // Millor rècord
     tft.setTextColor(tft.color565(255,215,0), TFT_BLACK);
     tft.setTextSize(2);
     String best = "Record: " + String(bestScore) + " pts";
     tft.setCursor(320/2 - tft.textWidth(best)/2, 175);
     tft.print(best);
-
     tft.drawFastHLine(40, 210, 240, tft.color565(255,60,0));
-
-    // Opcions
     tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setTextSize(2);
     tft.setCursor(320/2 - tft.textWidth("Prem A per jugar")/2, 250);
     tft.print("Prem A per jugar");
-
-    tft.setTextColor(TFT_WHITE, TFT_BLACK);
     tft.setCursor(320/2 - tft.textWidth("Prem B per carregar")/2, 290);
     tft.print("Prem B per carregar");
     tft.setCursor(320/2 - tft.textWidth("un nou joc")/2, 312);
@@ -673,7 +653,6 @@ int getDir(int v,int center=2048,int dz=300){
 bool hit(int ax,int ay,int aw,int ah,int bx,int by,int bw,int bh){
     return ax<bx+bw&&ax+aw>bx&&ay<by+bh&&ay+ah>by;
 }
-
 void drawRoadBg(){
     tft.fillRect(0,0,ROAD_LEFT,SCREEN_H,TFT_BLACK);
     tft.fillRect(ROAD_RIGHT,0,SCREEN_W-ROAD_RIGHT,SCREEN_H,TFT_BLACK);
@@ -817,19 +796,16 @@ void runGame(){
 
     while(true){
         if(!gameRunning){
-            if(score>bestScore){
-                bestScore=score;
-            }
+            if(score>bestScore) bestScore=score;
             if (xSemaphoreTake(recordMutex, pdMS_TO_TICKS(200)) == pdTRUE) {
-              saveRecord("road_rush", score);  // <- score, no bestScore
-              xSemaphoreGive(recordMutex);
+                saveRecord("road_rush", score);
+                xSemaphoreGive(recordMutex);
             }
             tft.fillScreen(TFT_BLACK);
             triggerCrash();
             showGameOver();
             while(digitalRead(BTN_A_PIN)==HIGH) delay(20);
             delay(50);
-            // Tornar al menú
             musicRunning=false;
             return;
         }
@@ -902,35 +878,36 @@ void setup() {
     tft.setRotation(2);
     tft.setBrightness(255);
 
-    // Crear mutex per als rècords (FreeRTOS sincronització)
     recordMutex = xSemaphoreCreateMutex();
-
     audioInit();
 
-    // Tasca música — core 0, prioritat 2
     xTaskCreatePinnedToCore(musicTask, "music", 4096, NULL, 2, NULL, 0);
-
-    // Tasca WiFi — core 0, prioritat 1 (sota la música)
     xTaskCreatePinnedToCore(wifiTask,  "wifi",  4096, NULL, 1, NULL, 0);
 
     COL_ROAD = tft.color565(105,105,105);
-            WiFi.mode(WIFI_AP);
-        WiFi.softAP(AP_SSID, AP_PASS);
-        WiFi.softAPConfig(
-            IPAddress(192,168,4,1),
-            IPAddress(192,168,4,1),
-            IPAddress(255,255,255,0)
-        );
-        server.on("/",        HTTP_GET,  handleRoot);
-        server.on("/records", HTTP_GET,  handleRecords);
-        server.on("/update",  HTTP_POST, handleUpdate, handleUpdateUpload);
-        server.begin();
-        wifiActiu = true;
+
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(AP_SSID, AP_PASS);
+    WiFi.softAPConfig(
+        IPAddress(192,168,4,1),
+        IPAddress(192,168,4,1),
+        IPAddress(255,255,255,0)
+    );
+    // Endpoints dashboard i OTA
+    server.on("/",        HTTP_GET,  handleRoot);
+    server.on("/records", HTTP_GET,  handleRecords);
+    server.on("/update",  HTTP_POST, handleUpdate, handleUpdateUpload);
+    // Endpoints MCP
+    server.on("/mcp/tools",      HTTP_GET, handleMcpTools);
+    server.on("/mcp/tools/call", HTTP_GET, handleMcpCall);
+    server.begin();
+    wifiActiu = true;
+
     showSplash();
 }
 
 // ============================================================
-//  LOOP — MENÚ PRINCIPAL
+//  LOOP
 // ============================================================
 void loop() {
     tft.fillScreen(TFT_BLACK);
@@ -941,12 +918,12 @@ void loop() {
         if (digitalRead(BTN_A_PIN) == LOW) {
             delay(50);
             runGame();
-            break;  // <- surt del while, loop() torna a cridar drawMenu()
+            break;
         }
         if (digitalRead(BTN_B_PIN) == LOW) {
             delay(50);
             runGameLoader();
-            break;  // <- afegeix aquest break
+            break;
         }
         delay(20);
     }
