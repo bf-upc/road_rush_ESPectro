@@ -215,19 +215,20 @@ body{background:#0d0d0d;color:#eee;font-family:'Courier New',monospace;
 h1{color:#ff5000;text-align:center;font-size:1.8em;letter-spacing:4px;
    padding:0.5em 0;border-bottom:2px solid #ff5000;margin-bottom:1em;}
 h1 span{color:#fff;}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:1em;max-width:800px;
-      margin:0 auto;}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1em;max-width:900px;margin:0 auto;}
 @media(max-width:600px){.grid{grid-template-columns:1fr;}}
 .card{background:#1a1a1a;border:1px solid #333;border-radius:10px;padding:1.2em;}
-.card h2{color:#ff5000;font-size:0.9em;letter-spacing:2px;
-         margin-bottom:0.8em;text-transform:uppercase;}
+.card h2{color:#ff5000;font-size:0.9em;letter-spacing:2px;margin-bottom:0.8em;}
+.game-card{background:#1a1a1a;border:1px solid #333;border-radius:10px;
+           padding:1.2em;margin-bottom:1em;}
+.game-card h3{color:#ff5000;font-size:0.9em;letter-spacing:2px;margin-bottom:0.8em;}
 .stat{display:flex;justify-content:space-between;align-items:center;
       padding:0.4em 0;border-bottom:1px solid #222;}
 .stat:last-child{border:none;}
 .stat-label{color:#888;font-size:0.85em;}
 .stat-val{color:#0f0;font-weight:bold;font-size:1.1em;}
 .stat-val.gold{color:#ffd700;}
-.chart{margin-top:0.5em;}
+.chart{margin-top:0.8em;}
 .chart-title{color:#888;font-size:0.75em;margin-bottom:0.5em;}
 .bars{display:flex;align-items:flex-end;gap:3px;height:80px;}
 .bar-wrap{display:flex;flex-direction:column;align-items:center;flex:1;}
@@ -244,26 +245,19 @@ label.btn:hover,button.btn:hover{background:#cc3e00;}
 #bar{height:100%;width:0;background:#ff5000;border-radius:4px;transition:width 0.3s;}
 #status{min-height:1.5em;font-size:0.85em;color:#ff0;}
 .ok{color:#0f0!important;} .err{color:#f44!important;}
-.sep{border:none;border-top:1px solid #333;margin:0.8em 0;}
 </style>
 </head>
 <body>
 <h1><span>ESP</span>ectro — Dashboard</h1>
 <div class="grid">
-  <div class="card" id="card-roadrush">
-    <h2>🏎 Road Rush</h2>
-    <div id="stats-roadrush">
-      <div class="stat"><span class="stat-label">Carregant...</span></div>
-    </div>
-    <hr class="sep">
-    <div class="chart">
-      <div class="chart-title">Últimes partides</div>
-      <div class="bars" id="bars-roadrush"></div>
+  <div id="games-col">
+    <div id="games-container">
+      <div class="game-card"><span style="color:#555">Carregant...</span></div>
     </div>
   </div>
   <div class="card">
-    <h2>⬆ Carregar joc</h2>
-    <label class="btn" for="file">📂 Triar .bin</label>
+    <h2>Carregar joc</h2>
+    <label class="btn" for="file">Triar .bin</label>
     <input type="file" id="file" accept=".bin">
     <div id="filename">Cap arxiu seleccionat</div>
     <button class="btn" onclick="upload()">Pujar joc</button>
@@ -272,66 +266,61 @@ label.btn:hover,button.btn:hover{background:#cc3e00;}
   </div>
 </div>
 <script>
-function avg(arr){ return arr.length ? Math.round(arr.reduce((a,b)=>a+b,0)/arr.length) : 0; }
-function renderGame(key, name, data){
-  const hist = data.history || [];
-  const best = data.best || 0;
-  const mitjana = avg(hist);
-  const partides = hist.length;
-  const darrera = hist[0] || 0;
-  document.getElementById('stats-' + key).innerHTML = `
-    <div class="stat"><span class="stat-label">🏆 Rècord</span><span class="stat-val gold">${best} pts</span></div>
-    <div class="stat"><span class="stat-label">🎮 Partides jugades</span><span class="stat-val">${partides}</span></div>
-    <div class="stat"><span class="stat-label">📊 Mitjana</span><span class="stat-val">${mitjana} pts</span></div>
-    <div class="stat"><span class="stat-label">🕹 Darrera partida</span><span class="stat-val ${darrera===best&&best>0?'gold':''}">${darrera} pts</span></div>`;
-  const barsDiv = document.getElementById('bars-' + key);
-  const last10 = hist.slice(0, 10).reverse();
-  const maxVal = Math.max(...last10, 1);
-  barsDiv.innerHTML = last10.map(v => {
-    const h = Math.round((v / maxVal) * 70);
-    const isRecord = v === best && best > 0;
-    return `<div class="bar-wrap"><div class="bar" style="height:${h}px;background:${isRecord?'#ffd700':'#ff5000'}"></div><div class="bar-val">${v}</div></div>`;
+function avg(arr){return arr.length?Math.round(arr.reduce((a,b)=>a+b,0)/arr.length):0;}
+function renderAllGames(data){
+  const entries=Object.entries(data);
+  const container=document.getElementById('games-container');
+  if(!entries.length){
+    container.innerHTML='<div class="game-card"><span style="color:#555">Cap joc registrat</span></div>';
+    return;
+  }
+  container.innerHTML=entries.map(([key,gd])=>{
+    const hist=gd.history||[];
+    const best=gd.best||0;
+    const mitjana=avg(hist);
+    const darrera=hist[0]||0;
+    const last10=hist.slice(0,10).reverse();
+    const maxVal=Math.max(...last10,1);
+    const bars=last10.length?last10.map(v=>{
+      const h=Math.round((v/maxVal)*70);
+      return`<div class="bar-wrap"><div class="bar" style="height:${h}px;background:${v===best&&best>0?'#ffd700':'#ff5000'}"></div><div class="bar-val">${v}</div></div>`;
+    }).join(''):'<span style="color:#555;font-size:0.8em">Sense dades</span>';
+    return`<div class="game-card">
+      <h3>${key.replace(/_/g,' ').toUpperCase()}</h3>
+      <div class="stat"><span class="stat-label">Record</span><span class="stat-val gold">${best} pts</span></div>
+      <div class="stat"><span class="stat-label">Partides</span><span class="stat-val">${hist.length}</span></div>
+      <div class="stat"><span class="stat-label">Mitjana</span><span class="stat-val">${mitjana} pts</span></div>
+      <div class="stat"><span class="stat-label">Darrera</span><span class="stat-val ${darrera===best&&best>0?'gold':''}">${darrera} pts</span></div>
+      <div class="chart"><div class="chart-title">Ultimes partides</div>
+      <div class="bars">${bars}</div></div>
+    </div>`;
   }).join('');
-  if(last10.length===0) barsDiv.innerHTML='<span style="color:#555;font-size:0.8em">Sense dades</span>';
 }
 function load(){
-  fetch('/records').then(r=>r.json()).then(data=>{
-    if(data.road_rush) renderGame('roadrush','Road Rush',data.road_rush);
-  }).catch(()=>{
-    document.getElementById('stats-roadrush').innerHTML='<div class="stat"><span class="stat-label" style="color:#f44">Error carregant</span></div>';
-  });
+  fetch('/records').then(r=>r.json()).then(renderAllGames).catch(()=>{});
 }
 load();
-setInterval(load, 10000);
+setInterval(load,10000);
 const fi=document.getElementById('file');
-fi.addEventListener('change',()=>{
-  document.getElementById('filename').textContent=fi.files[0]?.name||'Cap arxiu';
-});
+fi.addEventListener('change',()=>{document.getElementById('filename').textContent=fi.files[0]?.name||'Cap arxiu';});
 function upload(){
   const file=fi.files[0];
   const status=document.getElementById('status');
   const bar=document.getElementById('bar');
   const prog=document.getElementById('progress');
-  if(!file){status.textContent='Selecciona un arxiu primer';return;}
-  if(!file.name.endsWith('.bin')){status.textContent='Ha de ser un .bin';return;}
+  if(!file){status.textContent='Selecciona un arxiu';return;}
+  if(!file.name.endsWith('.bin')){status.textContent='Ha de ser .bin';return;}
   const xhr=new XMLHttpRequest();
   xhr.open('POST','/update',true);
   xhr.upload.onprogress=e=>{
-    if(e.lengthComputable){
-      const pct=Math.round(e.loaded/e.total*100);
-      prog.style.display='block';
-      bar.style.width=pct+'%';
-      status.textContent='Pujant... '+pct+'%';
-    }
+    if(e.lengthComputable){const pct=Math.round(e.loaded/e.total*100);prog.style.display='block';bar.style.width=pct+'%';status.textContent='Pujant... '+pct+'%';}
   };
   xhr.onload=()=>{
-    if(xhr.status===200){status.textContent='✅ Joc instal·lat. Reiniciant...';status.className='ok';}
-    else{status.textContent='❌ Error: '+xhr.responseText;status.className='err';}
+    if(xhr.status===200){status.textContent='Instal.lat. Reiniciant...';status.className='ok';}
+    else{status.textContent='Error: '+xhr.responseText;status.className='err';}
   };
-  xhr.onerror=()=>{status.textContent='❌ Error de connexió';status.className='err';};
-  const fd=new FormData();
-  fd.append('firmware',file,file.name);
-  xhr.send(fd);
+  xhr.onerror=()=>{status.textContent='Error connexio';status.className='err';};
+  const fd=new FormData();fd.append('firmware',file,file.name);xhr.send(fd);
 }
 </script>
 </body>
@@ -402,7 +391,26 @@ String loadHistory(const char* key) {
     return hist;
 }
 
+void registerGame(const char* key) {
+    nvs_handle_t h;
+    nvs_flash_init();
+    if (nvs_open("records", NVS_READWRITE, &h) == ESP_OK) {
+        char buf[256] = "";
+        size_t len = sizeof(buf);
+        nvs_get_str(h, "game_list", buf, &len);
+        String list = String(buf);
+        if (list.indexOf(key) < 0) {
+            if (list.length() > 0) list += ",";
+            list += key;
+            nvs_set_str(h, "game_list", list.c_str());
+            nvs_commit(h);
+        }
+        nvs_close(h);
+    }
+}
+
 void saveRecord(const char* key, int score) {
+    registerGame(key);
     nvs_handle_t h;
     nvs_flash_init();
     if (nvs_open("records", NVS_READWRITE, &h) == ESP_OK) {
@@ -442,16 +450,44 @@ void saveRecord(const char* key, int score) {
 }
 
 String getAllRecords() {
-    if (xSemaphoreTake(recordMutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-        int32_t best = loadRecord("road_rush");
-        String hist  = loadHistory("road_rush");
-        xSemaphoreGive(recordMutex);
-        return "{\"road_rush\":{\"best\":" + String(best) +
-               ",\"history\":" + hist + "}}";
-    }
-    return "{\"road_rush\":{\"best\":0,\"history\":[]}}";
-}
+    if (xSemaphoreTake(recordMutex, pdMS_TO_TICKS(100)) != pdTRUE)
+        return "{}";
 
+    nvs_handle_t h;
+    nvs_flash_init();
+    String json = "{";
+    if (nvs_open("records", NVS_READONLY, &h) == ESP_OK) {
+        char buf[256] = "";
+        size_t len = sizeof(buf);
+        nvs_get_str(h, "game_list", buf, &len);
+        String list = String(buf);
+        
+        bool first = true;
+        int start = 0;
+        while (start < (int)list.length()) {
+            int comma = list.indexOf(',', start);
+            String key = (comma < 0) 
+                ? list.substring(start) 
+                : list.substring(start, comma);
+            
+            if (key.length() > 0) {
+                int32_t best = 0;
+                nvs_get_i32(h, key.c_str(), &best);
+                String hist = loadHistory(key.c_str());
+                if (!first) json += ",";
+                json += "\"" + key + "\":{\"best\":" + String(best) + 
+                        ",\"history\":" + hist + "}";
+                first = false;
+            }
+            if (comma < 0) break;
+            start = comma + 1;
+        }
+        nvs_close(h);
+    }
+    json += "}";
+    xSemaphoreGive(recordMutex);
+    return json;
+}
 // ============================================================
 //  HANDLERS WEB
 // ============================================================
@@ -616,6 +652,13 @@ void drawMenu(int bestScore) {
     tft.print("Prem B per carregar");
     tft.setCursor(320/2 - tft.textWidth("un nou joc")/2, 312);
     tft.print("un nou joc");
+    uint16_t verd = tft.color565(0, 220, 40);
+    tft.setTextSize(1);
+    tft.fillCircle(SCREEN_W/2 - 105, 360, 4, wifiActiu ? verd : tft.color565(80,80,80));
+    tft.setTextColor(wifiActiu ? verd : tft.color565(120,120,120), TFT_BLACK);
+    const char* w = wifiActiu ? "WiFi actiu - ESPectro / 192.168.4.1" : "WiFi inactiu";
+    tft.setCursor(SCREEN_W/2 - 95, 356);
+    tft.print(w);
 }
 
 // ============================================================
@@ -722,6 +765,11 @@ void drawHUD(bool force){
         tft.setCursor(ROAD_RIGHT+2,10);tft.print(speedFactor);
         prevSpeedFactor=speedFactor;
     }
+tft.setTextColor(tft.color565(0, 180, 0), TFT_BLACK);
+tft.setCursor(1, 52);
+tft.print("Wi");
+tft.setCursor(1, 61);
+tft.print("Fi");
 }
 void spawnObs(){
     for(int i=0;i<MAX_OBS;i++){
