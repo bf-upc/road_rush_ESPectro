@@ -277,6 +277,7 @@ function renderAllGames(data){
   container.innerHTML=entries.map(([key,gd])=>{
     const hist=gd.history||[];
     const best=gd.best||0;
+    const total=gd.total!==undefined?gd.total:hist.length;
     const mitjana=avg(hist);
     const darrera=hist[0]||0;
     const last10=hist.slice(0,10).reverse();
@@ -288,7 +289,7 @@ function renderAllGames(data){
     return`<div class="game-card">
       <h3>${key.replace(/_/g,' ').toUpperCase()}</h3>
       <div class="stat"><span class="stat-label">Record</span><span class="stat-val gold">${best} pts</span></div>
-      <div class="stat"><span class="stat-label">Partides</span><span class="stat-val">${hist.length}</span></div>
+      <div class="stat"><span class="stat-label">Partides</span><span class="stat-val">${total}</span></div>
       <div class="stat"><span class="stat-label">Mitjana</span><span class="stat-val">${mitjana} pts</span></div>
       <div class="stat"><span class="stat-label">Darrera</span><span class="stat-val ${darrera===best&&best>0?'gold':''}">${darrera} pts</span></div>
       <div class="chart"><div class="chart-title">Ultimes partides</div>
@@ -414,10 +415,18 @@ void saveRecord(const char* key, int score) {
     nvs_handle_t h;
     nvs_flash_init();
     if (nvs_open("records", NVS_READWRITE, &h) == ESP_OK) {
+        // Actualitzar record maxim
         int32_t current = 0;
         nvs_get_i32(h, key, &current);
         if (score > current)
             nvs_set_i32(h, key, (int32_t)score);
+        // Incrementar comptador total de partides
+        String ckey = String(key) + "_c";
+        int32_t count = 0;
+        nvs_get_i32(h, ckey.c_str(), &count);
+        count++;
+        nvs_set_i32(h, ckey.c_str(), count);
+        // Actualitzar historial (ultimes 20)
         String hkey = String(key) + "_h";
         String hist = "[]";
         size_t len = 0;
@@ -432,10 +441,10 @@ void saveRecord(const char* key, int score) {
         if (inner.length() == 0) {
             nova = "[" + String(score) + "]";
         } else {
-            int count = 1;
+            int commas = 1;
             for (int i = 0; i < (int)inner.length(); i++)
-                if (inner[i] == ',') count++;
-            if (count >= MAX_HISTORY) {
+                if (inner[i] == ',') commas++;
+            if (commas >= MAX_HISTORY) {
                 int lc = inner.lastIndexOf(',');
                 inner = (lc >= 0) ? inner.substring(0, lc) : "";
             }
@@ -449,6 +458,7 @@ void saveRecord(const char* key, int score) {
     }
 }
 
+// getAllRecords — itera game_list i retorna tots els jocs
 String getAllRecords() {
     if (xSemaphoreTake(recordMutex, pdMS_TO_TICKS(100)) != pdTRUE)
         return "{}";
@@ -461,21 +471,34 @@ String getAllRecords() {
         size_t len = sizeof(buf);
         nvs_get_str(h, "game_list", buf, &len);
         String list = String(buf);
-        
         bool first = true;
         int start = 0;
-        while (start < (int)list.length()) {
+        while (start <= (int)list.length()) {
             int comma = list.indexOf(',', start);
-            String key = (comma < 0) 
-                ? list.substring(start) 
+            String key = (comma < 0)
+                ? list.substring(start)
                 : list.substring(start, comma);
-            
             if (key.length() > 0) {
+                // Record maxim
                 int32_t best = 0;
                 nvs_get_i32(h, key.c_str(), &best);
-                String hist = loadHistory(key.c_str());
+                // Comptador total
+                String ckey = key + "_c";
+                int32_t total = 0;
+                nvs_get_i32(h, ckey.c_str(), &total);
+                // Historial
+                String hkey = key + "_h";
+                String hist = "[]";
+                size_t hlen = 0;
+                if (nvs_get_str(h, hkey.c_str(), nullptr, &hlen) == ESP_OK && hlen > 0) {
+                    char* hbuf = new char[hlen];
+                    nvs_get_str(h, hkey.c_str(), hbuf, &hlen);
+                    hist = String(hbuf);
+                    delete[] hbuf;
+                }
                 if (!first) json += ",";
-                json += "\"" + key + "\":{\"best\":" + String(best) + 
+                json += "\"" + key + "\":{\"best\":" + String(best) +
+                        ",\"total\":" + String(total) +
                         ",\"history\":" + hist + "}";
                 first = false;
             }
@@ -488,6 +511,7 @@ String getAllRecords() {
     xSemaphoreGive(recordMutex);
     return json;
 }
+
 // ============================================================
 //  HANDLERS WEB
 // ============================================================
@@ -519,7 +543,7 @@ void handleUpdateUpload() {
             tft.fillRect(0, 260, 320, 60, TFT_BLACK);
             tft.setTextColor(TFT_GREEN, TFT_BLACK);
             tft.setTextSize(2);
-            tft.setCursor(10, 270); tft.print("Joc instal·lat!");
+            tft.setCursor(10, 270); tft.print("Joc instal.lat!");
             tft.setCursor(10, 295); tft.print("Reiniciant...");
         } else { Update.printError(Serial); }
     }
@@ -531,14 +555,14 @@ void handleUpdateUpload() {
 void handleMcpTools() {
     String json = "{\"tools\":["
         "{\"name\":\"get_records\","
-         "\"description\":\"Retorna els records i historial de puntuacions de tots els jocs de la consola ESPectro\","
-         "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
+        "\"description\":\"Records i historial de puntuacions de tots els jocs\","
+        "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
         "{\"name\":\"get_status\","
-         "\"description\":\"Retorna l'estat actual de la consola: uptime, memoria lliure i versio\","
-         "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
+        "\"description\":\"Estat de la consola: uptime i memoria\","
+        "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}},"
         "{\"name\":\"get_system_info\","
-         "\"description\":\"Retorna informacio tecnica del hardware: CPU, memoria PSRAM, frequencia i chip\","
-         "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
+        "\"description\":\"Info hardware: CPU, flash, PSRAM\","
+        "\"inputSchema\":{\"type\":\"object\",\"properties\":{}}}"
         "]}";
     server.sendHeader("Access-Control-Allow-Origin", "*");
     server.send(200, "application/json", json);
@@ -546,33 +570,33 @@ void handleMcpTools() {
 
 void handleMcpGetRecords() {
     String records = getAllRecords();
+    String resp = "{\"content\":[{\"type\":\"text\",\"text\":" + records + "}]}";
     server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "application/json",
-        "{\"content\":[{\"type\":\"text\",\"text\":" + records + "}]}");
+    server.send(200, "application/json", resp);
 }
 
 void handleMcpGetStatus() {
     unsigned long uptime = millis() / 1000;
+    String resp = "{\"content\":[{\"type\":\"text\",\"text\":{"
+                  "\"uptime_s\":" + String(uptime) + ","
+                  "\"free_heap_bytes\":" + String(ESP.getFreeHeap()) + ","
+                  "\"wifi_ssid\":\"ESPectro\","
+                  "\"ip\":\"192.168.4.1\","
+                  "\"version\":\"1.0.0\"}}]}";
     server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "application/json",
-        "{\"content\":[{\"type\":\"text\",\"text\":{"
-        "\"uptime_s\":" + String(uptime) + ","
-        "\"free_heap_bytes\":" + String(ESP.getFreeHeap()) + ","
-        "\"wifi_ssid\":\"ESPectro\","
-        "\"ip\":\"192.168.4.1\","
-        "\"version\":\"1.0.0\"}}]}");
+    server.send(200, "application/json", resp);
 }
 
 void handleMcpGetSystemInfo() {
+    String resp = "{\"content\":[{\"type\":\"text\",\"text\":{"
+                  "\"chip\":\"ESP32-S3\","
+                  "\"cpu_freq_mhz\":" + String(ESP.getCpuFreqMHz()) + ","
+                  "\"flash_size_mb\":" + String(ESP.getFlashChipSize()/1024/1024) + ","
+                  "\"free_heap_bytes\":" + String(ESP.getFreeHeap()) + ","
+                  "\"free_psram_bytes\":" + String(ESP.getFreePsram()) + ","
+                  "\"sdk_version\":\"" + String(ESP.getSdkVersion()) + "\"}}]}";
     server.sendHeader("Access-Control-Allow-Origin", "*");
-    server.send(200, "application/json",
-        "{\"content\":[{\"type\":\"text\",\"text\":{"
-        "\"chip\":\"ESP32-S3\","
-        "\"cpu_freq_mhz\":" + String(ESP.getCpuFreqMHz()) + ","
-        "\"flash_size_mb\":" + String(ESP.getFlashChipSize()/1024/1024) + ","
-        "\"free_heap_bytes\":" + String(ESP.getFreeHeap()) + ","
-        "\"free_psram_bytes\":" + String(ESP.getFreePsram()) + ","
-        "\"sdk_version\":\"" + String(ESP.getSdkVersion()) + "\"}}]}");
+    server.send(200, "application/json", resp);
 }
 
 void handleMcpCall() {
@@ -580,8 +604,10 @@ void handleMcpCall() {
     if      (tool == "get_records")     handleMcpGetRecords();
     else if (tool == "get_status")      handleMcpGetStatus();
     else if (tool == "get_system_info") handleMcpGetSystemInfo();
-    else server.send(404, "application/json",
-             "{\"error\":\"Tool no trobada: " + tool + "\"}");
+    else {
+        String err = "{\"error\":\"Tool no trobada: " + tool + "\"}";
+        server.send(404, "application/json", err);
+    }
 }
 
 // ============================================================
@@ -627,7 +653,7 @@ void runGameLoader() {
 }
 
 // ============================================================
-//  MENÚ PRINCIPAL
+//  MENU PRINCIPAL
 // ============================================================
 void drawMenu(int bestScore) {
     tft.fillScreen(TFT_BLACK);
@@ -765,11 +791,11 @@ void drawHUD(bool force){
         tft.setCursor(ROAD_RIGHT+2,10);tft.print(speedFactor);
         prevSpeedFactor=speedFactor;
     }
-tft.setTextColor(tft.color565(0, 180, 0), TFT_BLACK);
-tft.setCursor(1, 52);
-tft.print("Wi");
-tft.setCursor(1, 61);
-tft.print("Fi");
+    tft.setTextColor(tft.color565(0, 180, 0), TFT_BLACK);
+    tft.setCursor(1, 52);
+    tft.print("Wi");
+    tft.setCursor(1, 61);
+    tft.print("Fi");
 }
 void spawnObs(){
     for(int i=0;i<MAX_OBS;i++){
@@ -941,11 +967,9 @@ void setup() {
         IPAddress(192,168,4,1),
         IPAddress(255,255,255,0)
     );
-    // Endpoints dashboard i OTA
     server.on("/",        HTTP_GET,  handleRoot);
     server.on("/records", HTTP_GET,  handleRecords);
     server.on("/update",  HTTP_POST, handleUpdate, handleUpdateUpload);
-    // Endpoints MCP
     server.on("/mcp/tools",      HTTP_GET, handleMcpTools);
     server.on("/mcp/tools/call", HTTP_GET, handleMcpCall);
     server.begin();
